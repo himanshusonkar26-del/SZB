@@ -1,0 +1,178 @@
+
+HIMAN Pro — Project Folder Structure
+======================================
+Location: C:\Users\DELL\HIMAN\
+Version:  1.0
+Date:     October 2026
+======================================
+
+C:\Users\DELL\HIMAN\
+│
+│   ══════════════════════════════════════
+│   START KARNE WALI FILES (Yahi use karo)
+│   ══════════════════════════════════════
+│
+├── HIMAN_CHALO.bat          ★ DOUBLE CLICK KARO — poora system start
+├── run_himan.py               Python runner (dashboard + auto fetcher)
+├── main.py                    Entry point (3 modes: dashboard/cli/search)
+│
+│   ══════════════════════════════════════
+│   CORE AI FILES
+│   ══════════════════════════════════════
+│
+├── auto_fetcher.py            Jobs dhundne wala — har 30 min chalta hai
+├── proposal_writer.py         Proposals likhne wala — 5 agent types
+│
+│   ══════════════════════════════════════
+│   CONFIG FILES
+│   ══════════════════════════════════════
+│
+├── .env                     ★ SECRET — API keys yahan hain (kisi ko mat dikhao)
+├── .env.example               .env ka template (keys blank hain)
+├── .gitignore                 Git se .env hide karta hai
+├── requirements.txt           Python packages list
+│
+│   ══════════════════════════════════════
+│   DASHBOARD FOLDER
+│   ══════════════════════════════════════
+│
+├── dashboard/
+│   ├── bid_dashboard.py     ★ MAIN DASHBOARD — http://localhost:8502
+│   │                          Tabs: BID READY | Search | Job Paste |
+│   │                                Sab Jobs  | Kamaai | Security
+│   │
+│   └── app.py                 Purana dashboard (backup) — port 8501
+│
+│   ══════════════════════════════════════
+│   HIMAN BRAIN (Core Python Package)
+│   ══════════════════════════════════════
+│
+├── himan/
+│   ├── __init__.py            Package init (version: 0.1.0)
+│   ├── config.py              Settings — API keys, goals, limits load karta hai
+│   ├── llm.py                 Groq AI se baat karta hai (chat_text, chat_json)
+│   ├── orchestrator.py      ★ BOSS AGENT — jobs assign, QC, workflow manage
+│   ├── agents.py              5 Specialist agents (dev/writer/data/design/marketing)
+│   ├── memory.py              Database operations — jobs save/load/update
+│   ├── safety.py              Scam + illegal jobs block karta hai
+│   ├── security.py            Keys encrypt, logs redact, IDs generate
+│   ├── shield.py            ★ SECURITY SHIELD — loop guard, rate limiter,
+│   │                          injection blocker, crash guard, health check
+│   ├── telegram_alerts.py     Telegram notifications bhejta hai
+│   ├── emergency.py           Emergency stop — file-based flag
+│   └── cli.py                 Command line interface (himan ingest/list/show...)
+│
+│   ══════════════════════════════════════
+│   AGENTS FOLDER
+│   ══════════════════════════════════════
+│
+├── agents/
+│   ├── __init__.py            Package init
+│   └── search_agent.py        Freelancer.com se jobs fetch + AI score
+│
+│   ══════════════════════════════════════
+│   UTILS FOLDER
+│   ══════════════════════════════════════
+│
+├── utils/
+│   └── human_behavior.py      Human-like delays — bot detection se bachao
+│
+│   ══════════════════════════════════════
+│   DATA FOLDER (Auto-generated)
+│   ══════════════════════════════════════
+│
+├── data/
+│   ├── himan.db             ★ DATABASE — sab jobs, proposals, earnings yahan
+│   ├── master.key           ★ ENCRYPTION KEY — delete mat karo!
+│   └── EMERGENCY_STOP         Yeh file bani = system stopped (auto-delete on resume)
+│
+│   ══════════════════════════════════════
+│   LOGS FOLDER (Auto-generated)
+│   ══════════════════════════════════════
+│
+└── logs/
+    ├── himan.log              Sab activity log (rotate: 2MB, keep: 8 files)
+    └── security.log           Sirf security events (loop, injection, hacks)
+
+
+══════════════════════════════════════════════════════════
+AGENT TYPES — Kaunsa Agent Kya Karta Hai
+══════════════════════════════════════════════════════════
+
+Agent           File                Kaam
+──────────────────────────────────────────────────────────
+Boss Agent      orchestrator.py     Sab manage karta hai
+Search Agent    search_agent.py     Freelancer se jobs laata hai
+Dev Agent       agents.py           Python, coding, automation
+Writer Agent    agents.py           Articles, blogs, SEO
+Data Agent      agents.py           Excel, data entry, research
+Design Agent    agents.py           Logo, UI, graphics
+Marketing Agent agents.py           Ads, social media, email
+Safety Agent    safety.py           Scam/illegal block karta hai
+Security Shield shield.py           Hack/loop/injection rokta hai
+
+
+══════════════════════════════════════════════════════════
+DATA FLOW — Kaise Kaam Karta Hai
+══════════════════════════════════════════════════════════
+
+[auto_fetcher.py]
+      │
+      ├─ Freelancer.com API call (search_agent.py)
+      ├─ Rate limiter check (shield.py)
+      ├─ AI scoring — Groq (llm.py)
+      ├─ Safety check (safety.py)
+      ├─ Injection check (shield.py)
+      ├─ Proposal write (proposal_writer.py)
+      └─ Database save (memory.py)
+                │
+                ▼
+         [data/himan.db]
+                │
+                ▼
+      [bid_dashboard.py]
+                │
+                ├─ BID READY tab — proposal copy karo
+                ├─ Search tab — manual search
+                ├─ Job Paste tab — khud job do
+                ├─ Sab Jobs tab — history
+                ├─ Kamaai tab — earnings track
+                └─ Security tab — health check
+
+
+══════════════════════════════════════════════════════════
+IMPORTANT FILES — YEH KABHI DELETE MAT KARO
+══════════════════════════════════════════════════════════
+
+  .env              → API keys hain (naya setup karna padega)
+  data/himan.db     → Sab jobs/proposals/earnings (backup lo!)
+  data/master.key   → Encryption key (delete = data corrupt)
+
+
+══════════════════════════════════════════════════════════
+PORTS
+══════════════════════════════════════════════════════════
+
+  http://localhost:8501  → Purana dashboard (app.py)
+  http://localhost:8502  → Naya BID dashboard (bid_dashboard.py) ★ USE THIS
+
+
+══════════════════════════════════════════════════════════
+QUICK COMMANDS
+══════════════════════════════════════════════════════════
+
+  # Dashboard start karo
+  HIMAN_CHALO.bat
+
+  # Sirf search karo (no dashboard)
+  python main.py search
+
+  # CLI use karo
+  python main.py cli list
+  python main.py cli ingest --title "Job" --description "..."
+
+  # Requirements install karo (pehli baar)
+  pip install -r requirements.txt
+
+
+══════════════════════════════════════════════════════════

@@ -1,0 +1,23 @@
+# SECRETS — kabhi upload mat karo
+.env
+data/master.key
+
+# Database — local rehne do
+data/himan.db
+data/EMERGENCY_STOP
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Temp files
+*.tmp
+*.bak
+HIMAN_PROJECT/
