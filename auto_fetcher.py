@@ -1,15 +1,21 @@
 """
-HIMAN Auto Fetcher — Fixed Version
+HIMAN Auto Fetcher — v2.0 UPGRADED
 ====================================
-Freelancer.com public API se jobs fetch karta hai (RSS nahi — API use karta hai).
-Har 30 min mein automatically chalega.
+Multiple sources se jobs fetch karta hai:
+  1. Freelancer.com API
+  2. PeoplePerHour RSS
+  3. Guru.com RSS
+  4. Remotive.com API (remote jobs)
+
+Zyada skills, better scoring, daily stats save, agent tracking.
 """
 
 from __future__ import annotations
 
 import sys, os, time, random, json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date, timezone
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -33,12 +39,12 @@ _seen_titles: set[str] = set()
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
-    "Accept": "application/json",
+    "Accept": "application/json, text/html, application/xml",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# Freelancer API — in skills ke jobs dhundho
-SKILL_SEARCHES = [
+# ─── EXPANDED SKILLS — 25+ skills ────────────────────────────────────────────
+FREELANCER_SKILLS = [
     "python",
     "data-entry",
     "content-writing",
@@ -47,6 +53,38 @@ SKILL_SEARCHES = [
     "wordpress",
     "seo",
     "virtual-assistant",
+    "excel",
+    "chatbot",
+    "api-integration",
+    "social-media-marketing",
+    "email-marketing",
+    "copywriting",
+    "proofreading",
+    "research",
+    "transcription",
+    "translation",
+    "lead-generation",
+    "customer-support",
+    "web-design",
+    "javascript",
+    "react",
+    "flask",
+    "data-analysis",
+]
+
+# PeoplePerHour RSS feeds
+PPH_RSS_FEEDS = [
+    "https://www.peopleperhour.com/hourlie-rss-feed.xml",
+    "https://www.peopleperhour.com/project-rss-feed.xml",
+]
+
+# Guru RSS feeds
+GURU_RSS_FEEDS = [
+    "https://www.guru.com/d/jobs/rss/?keyword=python",
+    "https://www.guru.com/d/jobs/rss/?keyword=data+entry",
+    "https://www.guru.com/d/jobs/rss/?keyword=content+writing",
+    "https://www.guru.com/d/jobs/rss/?keyword=web+scraping",
+    "https://www.guru.com/d/jobs/rss/?keyword=virtual+assistant",
 ]
 
 
@@ -54,15 +92,15 @@ def _delay(lo=2.0, hi=4.5):
     time.sleep(random.uniform(lo, hi))
 
 
-def fetch_freelancer_jobs(limit_per_skill=8) -> list[dict]:
+# ─── SOURCE 1: Freelancer.com API ─────────────────────────────────────────────
+def fetch_freelancer_jobs(limit_per_skill: int = 8) -> list[dict]:
     """Freelancer public API se jobs fetch karo."""
     all_jobs = []
     seen_ids = set()
 
-    for skill in SKILL_SEARCHES:
-        _delay(2.0, 4.0)
-        # Rate limiter — Freelancer ban na kare
-        rate_limiter.wait("freelancer", min_gap_seconds=3.0)
+    for skill in FREELANCER_SKILLS:
+        _delay(1.5, 3.0)
+        rate_limiter.wait("freelancer", min_gap_seconds=2.0)
         url = (
             "https://www.freelancer.com/api/projects/0.1/projects/active/"
             f"?compact=true&limit={limit_per_skill}&job_details=true"
@@ -96,17 +134,182 @@ def fetch_freelancer_jobs(limit_per_skill=8) -> list[dict]:
                     "budget": budget,
                     "url": url_job,
                     "source": f"freelancer/{skill}",
-                    "skill_tag": skill,
+                    "platform": "Freelancer",
                 })
 
-            logger.info("Skill '{}': {} jobs", skill, len(projects))
+            logger.info("Freelancer '{}': {} jobs", skill, len(projects))
         except Exception as exc:
             logger.warning("Freelancer fetch failed for {}: {}", skill, exc)
 
-    logger.info("Total fetched: {} jobs", len(all_jobs))
     return all_jobs
 
 
+# ─── SOURCE 2: PeoplePerHour RSS ──────────────────────────────────────────────
+def fetch_pph_jobs() -> list[dict]:
+    """PeoplePerHour RSS se jobs fetch karo."""
+    jobs = []
+    try:
+        import xml.etree.ElementTree as ET
+        for feed_url in PPH_RSS_FEEDS:
+            _delay(2.0, 3.5)
+            try:
+                resp = httpx.get(feed_url, headers=HEADERS, timeout=15, follow_redirects=True)
+                if resp.status_code != 200:
+                    logger.warning("PPH RSS {} returned {}", feed_url, resp.status_code)
+                    continue
+
+                root = ET.fromstring(resp.text)
+                items = root.findall(".//item")
+                for item in items[:15]:
+                    title = item.findtext("title") or ""
+                    desc = item.findtext("description") or ""
+                    link = item.findtext("link") or ""
+
+                    title = title.strip()
+                    desc = desc.strip()
+
+                    if not title:
+                        continue
+
+                    jobs.append({
+                        "title": title[:300],
+                        "description": desc[:4000],
+                        "budget": "",
+                        "url": link,
+                        "source": "peopleperhour/rss",
+                        "platform": "PeoplePerHour",
+                    })
+
+                logger.info("PPH RSS: {} jobs from {}", len(items[:15]), feed_url)
+            except Exception as exc:
+                logger.warning("PPH feed {} failed: {}", feed_url, exc)
+    except Exception as exc:
+        logger.warning("PPH fetch error: {}", exc)
+
+    return jobs
+
+
+# ─── SOURCE 3: Guru.com RSS ───────────────────────────────────────────────────
+def fetch_guru_jobs() -> list[dict]:
+    """Guru.com RSS se jobs fetch karo."""
+    jobs = []
+    try:
+        import xml.etree.ElementTree as ET
+        for feed_url in GURU_RSS_FEEDS:
+            _delay(2.0, 3.5)
+            try:
+                resp = httpx.get(feed_url, headers=HEADERS, timeout=15, follow_redirects=True)
+                if resp.status_code != 200:
+                    logger.warning("Guru RSS {} returned {}", feed_url, resp.status_code)
+                    continue
+
+                root = ET.fromstring(resp.text)
+                items = root.findall(".//item")
+                for item in items[:10]:
+                    title = item.findtext("title") or ""
+                    desc = item.findtext("description") or ""
+                    link = item.findtext("link") or ""
+
+                    # Clean HTML tags from description
+                    import re
+                    desc = re.sub(r'<[^>]+>', ' ', desc).strip()
+                    title = title.strip()
+
+                    if not title:
+                        continue
+
+                    jobs.append({
+                        "title": title[:300],
+                        "description": desc[:4000],
+                        "budget": "",
+                        "url": link,
+                        "source": "guru/rss",
+                        "platform": "Guru",
+                    })
+
+                logger.info("Guru RSS: {} jobs from {}", len(items[:10]), feed_url)
+            except Exception as exc:
+                logger.warning("Guru feed {} failed: {}", feed_url, exc)
+    except Exception as exc:
+        logger.warning("Guru fetch error: {}", exc)
+
+    return jobs
+
+
+# ─── SOURCE 4: Remotive (Remote Jobs API) ─────────────────────────────────────
+def fetch_remotive_jobs() -> list[dict]:
+    """Remotive.com se remote freelance jobs fetch karo."""
+    jobs = []
+    try:
+        categories = ["software-dev", "writing-editing", "data", "marketing", "customer-support"]
+        for cat in categories[:3]:
+            _delay(1.5, 2.5)
+            url = f"https://remotive.com/api/remote-jobs?category={cat}&limit=5"
+            try:
+                resp = httpx.get(url, headers=HEADERS, timeout=15, follow_redirects=True)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                for job in data.get("jobs", [])[:5]:
+                    title = (job.get("title") or "").strip()
+                    desc = (job.get("description") or "").strip()
+                    # Clean HTML
+                    import re
+                    desc = re.sub(r'<[^>]+>', ' ', desc).strip()[:4000]
+                    link = job.get("url") or ""
+                    salary = job.get("salary") or ""
+
+                    if not title:
+                        continue
+
+                    jobs.append({
+                        "title": title[:300],
+                        "description": desc,
+                        "budget": salary,
+                        "url": link,
+                        "source": f"remotive/{cat}",
+                        "platform": "Remotive",
+                    })
+
+                logger.info("Remotive '{}': {} jobs", cat, len(data.get("jobs", [])[:5]))
+            except Exception as exc:
+                logger.warning("Remotive {} failed: {}", cat, exc)
+    except Exception as exc:
+        logger.warning("Remotive fetch error: {}", exc)
+
+    return jobs
+
+
+# ─── FETCH ALL SOURCES ─────────────────────────────────────────────────────────
+def fetch_all_jobs() -> list[dict]:
+    """Sabhi sources se jobs fetch karo."""
+    all_jobs = []
+
+    logger.info("--- Fetching Freelancer.com ---")
+    freelancer_jobs = fetch_freelancer_jobs(limit_per_skill=6)
+    all_jobs.extend(freelancer_jobs)
+    logger.info("Freelancer total: {}", len(freelancer_jobs))
+
+    logger.info("--- Fetching PeoplePerHour ---")
+    pph_jobs = fetch_pph_jobs()
+    all_jobs.extend(pph_jobs)
+    logger.info("PPH total: {}", len(pph_jobs))
+
+    logger.info("--- Fetching Guru.com ---")
+    guru_jobs = fetch_guru_jobs()
+    all_jobs.extend(guru_jobs)
+    logger.info("Guru total: {}", len(guru_jobs))
+
+    logger.info("--- Fetching Remotive ---")
+    remotive_jobs = fetch_remotive_jobs()
+    all_jobs.extend(remotive_jobs)
+    logger.info("Remotive total: {}", len(remotive_jobs))
+
+    logger.info("ALL SOURCES TOTAL: {} raw jobs", len(all_jobs))
+    return all_jobs
+
+
+# ─── AI SCORING ───────────────────────────────────────────────────────────────
 def ai_score(jobs: list[dict]) -> list[dict]:
     """AI se score karo — best jobs pehle."""
     if not settings.groq_ready or not jobs:
@@ -130,9 +333,12 @@ def ai_score(jobs: list[dict]) -> list[dict]:
                     "content": (
                         "Score these freelance jobs 0-100 for this freelancer:\n"
                         "Skills: Python, automation, web scraping, data entry, "
-                        "content writing, SEO, WordPress, virtual assistant, Excel, chatbot.\n"
+                        "content writing, SEO, WordPress, virtual assistant, Excel, "
+                        "chatbot, API integration, social media, email marketing, "
+                        "copywriting, transcription, research, lead generation.\n"
+                        "Score 80+ if great match, 55-79 if ok match, <55 skip.\n"
                         "JSON: {\"scores\":[{\"i\":0,\"score\":80,\"ok\":true,\"why\":\"good match\"}]}\n"
-                        "ok=true if score>=55. Scam/illegal = score 0."
+                        "ok=true if score>=55. Scam/adult/illegal = score 0 ok=false."
                     ),
                 },
                 {"role": "user", "content": json.dumps(items)},
@@ -156,6 +362,27 @@ def ai_score(jobs: list[dict]) -> list[dict]:
     return scored
 
 
+# ─── DETECT AGENT KIND ────────────────────────────────────────────────────────
+def _kind(title: str, desc: str) -> str:
+    b = (title + " " + desc).lower()
+    if any(w in b for w in ["python", "script", "code", "api", "bot", "automation", "website", "web app",
+                             "backend", "react", "flask", "django", "javascript", "developer", "programmer"]):
+        return "dev"
+    if any(w in b for w in ["write", "article", "blog", "content", "seo", "copywriting", "proofreading",
+                             "editing", "translation", "transcription"]):
+        return "writer"
+    if any(w in b for w in ["data entry", "excel", "spreadsheet", "copy paste", "typing", "research",
+                             "virtual assistant", "lead generation", "customer support"]):
+        return "data"
+    if any(w in b for w in ["design", "logo", "graphic", "banner", "ui", "figma", "photoshop", "illustrator"]):
+        return "design"
+    if any(w in b for w in ["marketing", "social media", "email", "ads", "campaign", "facebook",
+                             "instagram", "linkedin", "twitter"]):
+        return "marketing"
+    return "writer"
+
+
+# ─── SAVE JOB ─────────────────────────────────────────────────────────────────
 def save_job(job: dict) -> bool:
     """Job ko safety check karke DB mein save karo + proposal banao."""
     title = job["title"]
@@ -167,42 +394,50 @@ def save_job(job: dict) -> bool:
         return False
     _seen_titles.add(title_key)
 
-    # Loop guard — ek hi job baar baar process mat ho
+    # Loop guard
     if not loop_guard.check(f"job:{title_key[:60]}"):
         logger.warning("Loop guard blocked repeated job: {}", title[:50])
         sec_audit("LOOP_BLOCKED", title[:80])
         return False
 
-    # Prompt injection check
+    # Injection check
     if is_injection(title) or is_injection(desc):
         logger.warning("Injection detected in job: {}", title[:50])
         sec_audit("INJECTION_BLOCKED", title[:80], "WARNING")
         return False
 
-    # Input sanitize
+    # Sanitize
     title = sanitize_input(title, 300)
-    desc  = sanitize_input(desc, 8000)
+    desc = sanitize_input(desc, 8000)
 
     # Safety check
     verdict = assess_job(title, desc)
     if verdict.blocked:
-        logger.info("Blocked: {}", title[:50])
+        logger.info("Blocked (safety): {}", title[:50])
         return False
+
+    # Detect agent kind
+    agent_kind = _kind(title, desc)
 
     # Proposal banao
     proposal = ""
     try:
         from proposal_writer import write_proposal
-        proposal = write_proposal(title, desc, job.get("budget", ""))
+        proposal = write_proposal(title, desc, job.get("budget", ""), agent_kind)
         logger.success("Proposal ready for: {}", title[:50])
+        # Agent bump — success
+        memory.bump_agent(agent_kind, success=True)
     except Exception as exc:
         logger.warning("Proposal failed: {}", exc)
+        memory.bump_agent(agent_kind, success=False)
 
     # DB mein save
     try:
         memory.init_db()
         job_id = new_id("job")
-        source_note = job.get("source", "auto") + (" | " + job["url"] if job.get("url") else "")
+        platform = job.get("platform", "auto")
+        url_part = " | " + job["url"] if job.get("url") else ""
+        source_note = f"{platform}{url_part}"
 
         db_job = {
             "id": job_id,
@@ -213,17 +448,20 @@ def save_job(job: dict) -> bool:
             "status": "ready",
             "safety_level": verdict.level,
             "safety": {"level": verdict.level, "category": verdict.category, "reasons": verdict.reasons},
-            "agent_kind": _kind(title, desc),
+            "agent_kind": agent_kind,
             "draft": proposal,
             "retries": 0,
         }
         memory.insert_job(db_job)
-        memory.audit("auto_fetcher", job_id, f"score={job.get('score',0)}")
+        memory.audit("auto_fetcher", job_id, f"score={job.get('score', 0)} | platform={platform}")
 
-        # Telegram alert
+        # Telegram alert for high score jobs
         if settings.telegram_ready and job.get("score", 0) >= 70:
-            from himan.telegram_alerts import notify_new_job
-            notify_new_job(title, job.get("score", 0), job.get("ai_reason", ""), job.get("url", ""))
+            try:
+                from himan.telegram_alerts import notify_new_job
+                notify_new_job(title, job.get("score", 0), job.get("ai_reason", ""), job.get("url", ""))
+            except Exception:
+                pass
 
         return True
     except Exception as exc:
@@ -231,28 +469,45 @@ def save_job(job: dict) -> bool:
         return False
 
 
-def _kind(title: str, desc: str) -> str:
-    b = (title + " " + desc).lower()
-    if any(w in b for w in ["python","script","code","api","bot","automation","website","web app","backend","react","flask","django"]):
-        return "dev"
-    if any(w in b for w in ["write","article","blog","content","seo","copywriting","proofreading"]):
-        return "writer"
-    if any(w in b for w in ["data entry","excel","spreadsheet","copy paste","typing","research","virtual assistant"]):
-        return "data"
-    if any(w in b for w in ["design","logo","graphic","banner","ui","figma","photoshop"]):
-        return "design"
-    if any(w in b for w in ["marketing","social media","email","ads","campaign","facebook","instagram"]):
-        return "marketing"
-    return "writer"
+# ─── SAVE DAILY STATS ─────────────────────────────────────────────────────────
+def save_daily_stats(fetched: int, saved: int) -> None:
+    """Aaj ke stats DB mein save karo."""
+    try:
+        today = date.today().isoformat()
+        with memory.connect() as conn:
+            existing = conn.execute(
+                "SELECT date FROM daily_stats WHERE date=?", (today,)
+            ).fetchone()
+
+            if existing:
+                # Update karo
+                conn.execute(
+                    """UPDATE daily_stats SET
+                       jobs_fetched = jobs_fetched + ?,
+                       bids_placed = bids_placed + 0,
+                       notes = ?
+                       WHERE date = ?""",
+                    (fetched, f"last_saved={saved}", today)
+                )
+            else:
+                # Naya insert
+                conn.execute(
+                    """INSERT INTO daily_stats(date, jobs_fetched, bids_placed, bids_won, earnings, best_agent, notes)
+                       VALUES (?, ?, 0, 0, 0.0, '', ?)""",
+                    (today, fetched, f"first_cycle, saved={saved}")
+                )
+        logger.info("Daily stats saved for {}", today)
+    except Exception as exc:
+        logger.warning("Daily stats save failed: {}", exc)
 
 
+# ─── MAIN CYCLE ───────────────────────────────────────────────────────────────
 def run_cycle() -> int:
     """Ek cycle: fetch → score → save. Returns saved count."""
     if emergency.is_stopped():
         logger.warning("Emergency stop active.")
         return 0
 
-    # Loop guard — cycle baar baar na chale
     if not loop_guard.check("fetch_cycle"):
         logger.warning("Loop guard: too many cycles too fast. Waiting...")
         sec_audit("CYCLE_LOOP_BLOCKED", "fetch_cycle ran too fast")
@@ -260,14 +515,15 @@ def run_cycle() -> int:
         return 0
 
     logger.info("=" * 50)
-    logger.info("HIMAN Fetch Cycle — {}", datetime.now().strftime("%H:%M:%S"))
+    logger.info("HIMAN Fetch Cycle v2.0 — {}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-    raw = fetch_freelancer_jobs(limit_per_skill=8)
+    # Sabhi sources se jobs fetch karo
+    raw = fetch_all_jobs()
     if not raw:
-        logger.warning("Koi jobs nahi mili.")
+        logger.warning("Koi jobs nahi mili kisi bhi source se.")
         return 0
 
-    # Deduplicate
+    # Deduplicate by title
     seen = set()
     unique = []
     for j in raw:
@@ -276,16 +532,16 @@ def run_cycle() -> int:
             seen.add(k)
             unique.append(j)
 
-    logger.info("Unique jobs: {}", len(unique))
+    logger.info("Unique jobs after dedup: {}", len(unique))
 
-    # Score
+    # AI Score
     scored = ai_score(unique)
     shortlisted = [j for j in scored if j.get("shortlisted")]
     logger.info("Shortlisted: {}/{}", len(shortlisted), len(scored))
 
-    # Save top 10
+    # Save top 12 (zyada jobs = zyada bids)
     saved = 0
-    for job in shortlisted[:10]:
+    for job in shortlisted[:12]:
         if emergency.is_stopped():
             break
         if save_job(job):
@@ -294,16 +550,25 @@ def run_cycle() -> int:
 
     logger.info("Cycle done: {} jobs saved to DB", saved)
 
+    # Daily stats save karo
+    save_daily_stats(fetched=len(raw), saved=saved)
+
+    # Telegram summary
     if settings.telegram_ready and saved > 0:
-        from himan.telegram_alerts import notify_search_summary
-        notify_search_summary(len(raw), saved)
+        try:
+            from himan.telegram_alerts import notify_search_summary
+            notify_search_summary(len(raw), saved)
+        except Exception:
+            pass
 
     return saved
 
 
 def main():
     interval = int(os.getenv("SEARCH_INTERVAL_MINUTES", "30"))
-    logger.info("HIMAN Auto Fetcher started! Interval: {} min", interval)
+    logger.info("HIMAN Auto Fetcher v2.0 started! Interval: {} min", interval)
+    logger.info("Sources: Freelancer + PeoplePerHour + Guru + Remotive")
+    logger.info("Skills: {} categories", len(FREELANCER_SKILLS))
 
     run_cycle()  # Pehla cycle abhi
 

@@ -24,7 +24,7 @@ def _bool(name: str, default: bool = True) -> bool:
 
 class Settings:
     groq_api_key: str = os.getenv("GROQ_API_KEY", "").strip()
-    groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+    groq_model: str = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip()
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     monthly_goal_usd: float = float(os.getenv("MONTHLY_GOAL_USD", "100") or 100)
