@@ -78,6 +78,31 @@ PPH_RSS_FEEDS = [
     "https://www.peopleperhour.com/project-rss-feed.xml",
 ]
 
+# ─── Upwork RSS feeds (public, no login needed) ───────────────────────────────
+UPWORK_RSS_FEEDS = [
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=python+automation&sort=recency",
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=data+entry&sort=recency",
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=content+writing&sort=recency",
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=web+scraping&sort=recency",
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=virtual+assistant&sort=recency",
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=wordpress&sort=recency",
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=seo&sort=recency",
+    "https://www.upwork.com/ab/feed/jobs/rss?paging=0%3B10&q=social+media+marketing&sort=recency",
+]
+
+# ─── RemoteOK API (free, no auth) ─────────────────────────────────────────────
+REMOTEOK_TAGS = [
+    "python", "automation", "writing", "data-entry", "marketing",
+    "dev", "backend", "wordpress", "seo",
+]
+
+# ─── WorkingNomads RSS (remote jobs) ──────────────────────────────────────────
+WORKINGNOMADS_FEEDS = [
+    "https://www.workingnomads.com/api/exposed_jobs/?category=development&format=json",
+    "https://www.workingnomads.com/api/exposed_jobs/?category=writing&format=json",
+    "https://www.workingnomads.com/api/exposed_jobs/?category=marketing&format=json",
+]
+
 # Guru RSS feeds
 GURU_RSS_FEEDS = [
     "https://www.guru.com/d/jobs/rss/?keyword=python",
@@ -280,6 +305,128 @@ def fetch_remotive_jobs() -> list[dict]:
     return jobs
 
 
+# ─── SOURCE 5: Upwork RSS ─────────────────────────────────────────────────────
+def fetch_upwork_jobs() -> list[dict]:
+    """Upwork public RSS feeds se jobs fetch karo (no login needed)."""
+    jobs = []
+    try:
+        import xml.etree.ElementTree as ET
+        import re as _re
+        for feed_url in UPWORK_RSS_FEEDS:
+            _delay(2.5, 4.0)
+            try:
+                resp = httpx.get(feed_url, headers=HEADERS, timeout=20, follow_redirects=True)
+                if resp.status_code != 200:
+                    logger.warning("Upwork RSS {} returned {}", feed_url, resp.status_code)
+                    continue
+
+                # Upwork RSS sometimes has encoding issues
+                content = resp.text
+                # Fix common XML issues
+                content = content.replace("&", "&amp;").replace("&amp;amp;", "&amp;")
+
+                try:
+                    root = ET.fromstring(content)
+                except ET.ParseError:
+                    # Try stripping problematic chars
+                    content = _re.sub(r'[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]', '', resp.text)
+                    try:
+                        root = ET.fromstring(content)
+                    except Exception:
+                        continue
+
+                items = root.findall(".//item")
+                for item in items[:8]:
+                    title = item.findtext("title") or ""
+                    desc = item.findtext("description") or ""
+                    link = item.findtext("link") or ""
+                    budget = ""
+
+                    # Clean HTML tags
+                    desc = _re.sub(r'<[^>]+>', ' ', desc).strip()
+                    # Extract budget from description if present
+                    budget_match = _re.search(r'Budget:\s*\$?([\d,]+(?:\.\d+)?)', desc, _re.IGNORECASE)
+                    if budget_match:
+                        budget = "$" + budget_match.group(1)
+                    # Hourly rate
+                    hourly_match = _re.search(r'Hourly Range:\s*\$?([\d\.]+)\s*[-–]\s*\$?([\d\.]+)', desc, _re.IGNORECASE)
+                    if hourly_match:
+                        budget = f"${hourly_match.group(1)}-${hourly_match.group(2)}/hr"
+
+                    title = title.strip()
+                    if not title or len(title) < 5:
+                        continue
+
+                    jobs.append({
+                        "title": title[:300],
+                        "description": desc[:4000],
+                        "budget": budget,
+                        "url": link,
+                        "source": "upwork/rss",
+                        "platform": "Upwork",
+                    })
+
+                logger.info("Upwork RSS: {} jobs from {}", len(items[:8]), feed_url[:70])
+            except Exception as exc:
+                logger.warning("Upwork feed {} failed: {}", feed_url[:60], exc)
+    except Exception as exc:
+        logger.warning("Upwork fetch error: {}", exc)
+
+    return jobs
+
+
+# ─── SOURCE 6: RemoteOK API ────────────────────────────────────────────────────
+def fetch_remoteok_jobs() -> list[dict]:
+    """RemoteOK.com free API se remote jobs fetch karo."""
+    jobs = []
+    try:
+        _delay(2.0, 3.0)
+        url = "https://remoteok.com/api"
+        resp = httpx.get(url, headers={**HEADERS, "Accept": "application/json"}, timeout=20, follow_redirects=True)
+        if resp.status_code != 200:
+            logger.warning("RemoteOK returned {}", resp.status_code)
+            return jobs
+
+        data = resp.json()
+        # First item is a note/legal, skip it
+        listings = [j for j in data if isinstance(j, dict) and j.get("id") and j.get("position")]
+
+        # Filter relevant ones
+        relevant_tags = {"python", "automation", "content", "writing", "data", "marketing",
+                         "seo", "wordpress", "virtual", "excel", "copywriting", "research",
+                         "javascript", "react", "django", "flask", "backend", "frontend"}
+
+        for listing in listings[:30]:
+            tags = set(t.lower() for t in (listing.get("tags") or []))
+            if not (tags & relevant_tags):
+                continue  # skip irrelevant jobs
+
+            title = (listing.get("position") or "").strip()
+            desc = (listing.get("description") or "").strip()
+            import re as _re
+            desc = _re.sub(r'<[^>]+>', ' ', desc).strip()
+            link = listing.get("url") or f"https://remoteok.com/remote-jobs/{listing.get('id','')}"
+            salary = listing.get("salary") or ""
+
+            if not title:
+                continue
+
+            jobs.append({
+                "title": title[:300],
+                "description": desc[:4000],
+                "budget": salary,
+                "url": link,
+                "source": "remoteok/api",
+                "platform": "RemoteOK",
+            })
+
+        logger.info("RemoteOK: {} relevant jobs", len(jobs))
+    except Exception as exc:
+        logger.warning("RemoteOK fetch error: {}", exc)
+
+    return jobs
+
+
 # ─── FETCH ALL SOURCES ─────────────────────────────────────────────────────────
 def fetch_all_jobs() -> list[dict]:
     """Sabhi sources se jobs fetch karo."""
@@ -304,6 +451,16 @@ def fetch_all_jobs() -> list[dict]:
     remotive_jobs = fetch_remotive_jobs()
     all_jobs.extend(remotive_jobs)
     logger.info("Remotive total: {}", len(remotive_jobs))
+
+    logger.info("--- Fetching Upwork RSS ---")
+    upwork_jobs = fetch_upwork_jobs()
+    all_jobs.extend(upwork_jobs)
+    logger.info("Upwork total: {}", len(upwork_jobs))
+
+    logger.info("--- Fetching RemoteOK ---")
+    remoteok_jobs = fetch_remoteok_jobs()
+    all_jobs.extend(remoteok_jobs)
+    logger.info("RemoteOK total: {}", len(remoteok_jobs))
 
     logger.info("ALL SOURCES TOTAL: {} raw jobs", len(all_jobs))
     return all_jobs

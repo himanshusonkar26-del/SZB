@@ -157,8 +157,9 @@ c5.metric("📅 Aaj",       f"${day_earned:.2f}")
 c6.metric("📊 Mahina",    f"${mon_earned:.2f}")
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "⚡ BID READY", "🔍 Search", "✍️ Job Paste", "📋 Sab Jobs", "💰 Kamaai", "🛡️ Security"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "⚡ BID READY", "🔍 Search", "✍️ Job Paste", "📋 Sab Jobs",
+    "💰 Kamaai", "💡 Smart Bid", "📊 Report", "🛡️ Security"
 ])
 
 # ════════════════════════════════════════════════════════════════════════
@@ -428,9 +429,196 @@ with tab5:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# TAB 6 — SECURITY
+# TAB 6 — SMART BID PRICING
 # ════════════════════════════════════════════════════════════════════════
 with tab6:
+    st.subheader("💡 Smart Bid Pricing")
+    st.caption("Job ka budget dekho — HIMAN batayega exactly kitna bid karo aur kya strategy lo")
+
+    from smart_bid import suggest_bid, bid_line, format_for_dashboard
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        sb_title  = st.text_input("Job Title", placeholder="Python automation script for Excel")
+        sb_budget = st.text_input("Client Budget", placeholder="$50-100 ya $30 ya blank")
+    with col2:
+        sb_kind = st.selectbox("Job Type", ["dev", "writer", "data", "design", "marketing"])
+
+    if st.button("🧮 Best Bid Calculate Karo", type="primary", use_container_width=True):
+        s = suggest_bid(sb_budget, sb_kind, sb_title)
+        info = format_for_dashboard(s)
+
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("💰 Suggested Bid", f"${s.bid_amount:.0f}")
+        c2.metric("📅 Delivery", f"{s.delivery_days} days")
+        c3.metric("📊 Confidence", info["confidence"])
+
+        st.info(f"**Strategy:** {info['strategy']}")
+
+        if s.milestone:
+            st.warning("💡 Milestone payment recommend: 50% advance + 50% on delivery")
+
+        st.markdown("**📋 Proposal ke end mein yeh line add karo:**")
+        st.code(info["bid_line"])
+
+        if sb_budget:
+            st.markdown("**Budget breakdown:**")
+            st.write(f"Client ka budget: {info['bid_range']}")
+            st.write(f"Tumhara bid: **${s.bid_amount:.0f}** (sweet spot)")
+
+    st.divider()
+    st.subheader("📚 Quick Reference Table")
+    st.markdown("""
+| Client Budget | Tumhara Bid | Strategy |
+|--------------|-------------|----------|
+| $10 – $20    | $12 – $16   | Competitive, fast delivery |
+| $20 – $50    | $15 – $38   | 75% of max, emphasize quality |
+| $50 – $100   | $35 – $70   | Don't go below $35 |
+| $100 – $200  | $75 – $145  | Milestone payment suggest karo |
+| $200 – $500  | $155 – $385 | Detailed proposal, milestone must |
+| $500+        | 70-75% of max| Requirements clear karo pehle |
+| Budget N/A   | Market avg  | Job type ke hisab se |
+""")
+
+    st.divider()
+    st.subheader("🔥 BID READY Jobs — Suggested Prices")
+    ready_for_bid = [j for j in jobs_all if j["status"] == "ready"][:10]
+    if ready_for_bid:
+        for j in ready_for_bid:
+            bgt = j.get("budget", "") or ""
+            kind = j.get("agent_kind", "writer")
+            s = suggest_bid(bgt, kind, j.get("title", ""))
+            icon = {"dev":"💻","writer":"✍️","data":"📊","design":"🎨","marketing":"📣"}.get(kind,"🤖")
+            conf_color = {"high":"🟢","medium":"🟡","low":"🔴"}.get(s.confidence,"⚪")
+            with st.expander(f"{icon} {j['title'][:55]} — Bid: **${s.bid_amount:.0f}**"):
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Client Budget", bgt or "Not specified")
+                col2.metric("Your Bid", f"${s.bid_amount:.0f}")
+                col3.metric("Confidence", f"{conf_color} {s.confidence.title()}")
+                st.caption(s.strategy)
+                st.code(bid_line(s))
+    else:
+        st.info("Abhi koi BID READY jobs nahi — Search karo pehle")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# TAB 7 — REPORTS
+# ════════════════════════════════════════════════════════════════════════
+with tab7:
+    st.subheader("📊 Reports — Daily / Weekly / Monthly")
+    st.caption("Poora kaam ka hisaab — kitni jobs, kitni bids, kitna kamaya")
+
+    from reporter import generate_daily_report, generate_weekly_report, generate_monthly_report, get_quick_stats
+
+    # Quick stats cards
+    try:
+        stats = get_quick_stats()
+        st.markdown("### 📈 Quick Stats")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.markdown("**📅 Aaj**")
+            st.metric("Jobs", stats["today"]["jobs_found"])
+            st.metric("Bids", stats["today"]["bids_placed"])
+            st.metric("Earnings", f'${stats["today"]["earnings"]:.2f}')
+        with c2:
+            st.markdown("**📆 Is Hafte**")
+            st.metric("Jobs", stats["week"]["jobs_found"])
+            st.metric("Bids", stats["week"]["bids_placed"])
+            st.metric("Earnings", f'${stats["week"]["earnings"]:.2f}')
+        with c3:
+            st.markdown("**📊 Is Mahine**")
+            st.metric("Jobs", stats["month"]["jobs_found"])
+            st.metric("Bids", stats["month"]["bids_placed"])
+            st.metric("Earnings", f'${stats["month"]["earnings"]:.2f}')
+        with c4:
+            st.markdown("**🏆 All Time**")
+            st.metric("Jobs", stats["all_time"]["jobs_found"])
+            st.metric("Bids", stats["all_time"]["bids_placed"])
+            st.metric("Earnings", f'${stats["all_time"]["earnings"]:.2f}')
+    except Exception as e:
+        st.warning(f"Stats load nahi hue: {e}")
+
+    st.divider()
+
+    # Report generation buttons
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button("📅 Daily Report", type="primary", use_container_width=True):
+            with st.spinner("Report ban rahi hai..."):
+                try:
+                    text, path = generate_daily_report()
+                    st.session_state["report_text"] = text
+                    st.session_state["report_path"] = path
+                    st.session_state["report_type"] = "Daily"
+                    st.success(f"✅ Saved: {path}")
+                except Exception as ex:
+                    st.error(str(ex))
+
+    with col2:
+        if st.button("📆 Weekly Report", type="primary", use_container_width=True):
+            with st.spinner("Report ban rahi hai..."):
+                try:
+                    text, path = generate_weekly_report()
+                    st.session_state["report_text"] = text
+                    st.session_state["report_path"] = path
+                    st.session_state["report_type"] = "Weekly"
+                    st.success(f"✅ Saved: {path}")
+                except Exception as ex:
+                    st.error(str(ex))
+
+    with col3:
+        if st.button("📊 Monthly Report", type="primary", use_container_width=True):
+            with st.spinner("Report ban rahi hai..."):
+                try:
+                    text, path = generate_monthly_report()
+                    st.session_state["report_text"] = text
+                    st.session_state["report_path"] = path
+                    st.session_state["report_type"] = "Monthly"
+                    st.success(f"✅ Saved: {path}")
+                except Exception as ex:
+                    st.error(str(ex))
+
+    # Show report if generated
+    if "report_text" in st.session_state:
+        st.divider()
+        st.markdown(f"### 📄 {st.session_state.get('report_type','')} Report")
+        st.caption(f"Saved at: {st.session_state.get('report_path','')}")
+        st.text(st.session_state["report_text"])
+
+        # Download button
+        st.download_button(
+            label="⬇️ Download Report",
+            data=st.session_state["report_text"],
+            file_name=f"himan_{st.session_state.get('report_type','').lower()}_report.txt",
+            mime="text/plain",
+        )
+
+    st.divider()
+    st.markdown("### 📁 Saved Reports")
+    reports_dir = ROOT / "data" / "reports"
+    if reports_dir.exists():
+        report_files = sorted(reports_dir.glob("*.txt"), reverse=True)
+        if report_files:
+            for rf in report_files[:10]:
+                col1, col2 = st.columns([3, 1])
+                col1.write(f"📄 {rf.name}")
+                if col2.button("👁️ Dekho", key=f"view_{rf.name}"):
+                    st.session_state["report_text"] = rf.read_text(encoding="utf-8")
+                    st.session_state["report_path"] = str(rf)
+                    st.session_state["report_type"] = rf.stem.split("_")[0].title()
+                    st.rerun()
+        else:
+            st.info("Abhi koi saved report nahi — upar button dabao")
+    else:
+        st.info("Reports folder abhi empty hai — pehla report generate karo")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# TAB 8 — SECURITY (was tab6)
+# ════════════════════════════════════════════════════════════════════════
+with tab8:
     st.subheader("🛡️ HIMAN Security Shield")
     st.caption("Hack, loop, injection, aur leak se bachao")
 
